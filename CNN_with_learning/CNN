@@ -1,0 +1,114 @@
+import sys
+import os
+
+import matplotlib.animation as animation
+import numpy as np
+import matplotlib.pyplot as plt
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))) # добавить родительскую папку в sys.path
+
+from CNN_without_learning.data_loader import load_single_image
+
+def sigmoid(x):
+    return 1 / (1 + np.exp(-x))
+
+def sigmoid_deriv(x):
+    s = sigmoid(x)
+    return s * (1 - s)
+
+def relu(x):
+    return np.maximum(0, x)
+
+def relu_deriv(x):
+    return (x > 0).astype(float)
+
+class SimpleCNN:
+    def __init__(self, learning_rate=0.01):
+        self.kernel = np.random.randn(3, 3, 3) * 0.1  # 3x3x3 фильтр
+        self.dense_weight = np.random.randn(1) * 0.1  # Dense слой
+        self.dense_bias = 0.0
+        self.lr = learning_rate
+        self.kernel_history = []
+
+    def conv2d(self, image, kernel):
+        H, W, C = image.shape
+        kH, kW, _ = kernel.shape
+        out_H, out_W = H - kH + 1, W - kW + 1
+        output = np.zeros((out_H, out_W))
+
+        for y in range(out_H):
+            for x in range(out_W):
+                region = image[y:y+kH, x:x+kW, :]
+                output[y, x] = np.sum(region * kernel)
+        return output
+
+    def forward(self, image):
+        self.image = image
+        self.conv_out = self.conv2d(image, self.kernel)
+        self.relu_out = relu(self.conv_out)
+        self.global_avg = np.mean(self.relu_out)
+        self.z = self.global_avg * self.dense_weight + self.dense_bias
+        self.out = sigmoid(self.z)
+        return self.out
+
+    def backward(self, label):
+        loss_grad = self.out - label  # dL/dy
+
+        # Dense layer grad
+        dW_dense = self.global_avg * loss_grad
+        db_dense = loss_grad
+        d_global_avg = self.dense_weight * loss_grad
+
+        # Global avg pool grad → dL/dConv
+        d_relu = np.ones_like(self.relu_out) * (d_global_avg / self.relu_out.size)
+        d_conv = d_relu * relu_deriv(self.conv_out)
+
+        # Grad for conv kernel
+        d_kernel = np.zeros_like(self.kernel)
+        for y in range(d_conv.shape[0]):
+            for x in range(d_conv.shape[1]):
+                region = self.image[y:y+3, x:x+3, :]
+                d_kernel += region * d_conv[y, x]
+
+        # SGD update
+        self.kernel -= self.lr * d_kernel
+        self.dense_weight -= self.lr * dW_dense
+        self.dense_bias -= self.lr * db_dense
+
+        # Save kernel for visualization
+        self.kernel_history.append(self.kernel.copy())
+
+    def compute_loss(self, y_true, y_pred):
+        eps = 1e-8
+        return - (y_true * np.log(y_pred + eps) + (1 - y_true) * np.log(1 - y_pred + eps))
+
+def animate_filter(kernel_history):
+        fig, ax = plt.subplots()
+        im = ax.imshow(kernel_history[0][:, :, 0], cmap='seismic', vmin=-1, vmax=1)
+        ax.set_title("Filter Evolution (Channel 0)")
+
+        def update(frame):
+            im.set_data(kernel_history[frame][:, :, 0])
+            ax.set_title(f"Epoch {frame}")
+            return [im]
+
+        ani = animation.FuncAnimation(fig, update, frames=len(kernel_history), interval=100)
+        plt.show()
+
+if __name__ == "__main__":
+    # Класс 0 = 'airplane', другие — негативный класс
+    image, label, label_name = load_single_image(index=5)
+    y = 1 if label == 0 else 0
+
+    cnn = SimpleCNN(learning_rate=0.01)
+    losses = []
+
+    for epoch in range(100):
+        y_pred = cnn.forward(image)
+        loss = cnn.compute_loss(y, y_pred)
+        cnn.backward(y)
+        losses.append(loss)
+
+        if epoch % 10 == 0:
+            print(f"Epoch {epoch}: Loss = {loss:.4f}, Pred = {y_pred:.3f}")
+
+    animate_filter(cnn.kernel_history)
