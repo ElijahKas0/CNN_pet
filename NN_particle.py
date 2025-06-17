@@ -91,6 +91,7 @@ weights_1_2 = 2*np.random.rand(4,1)-1
 
 alpha = 0.2
 
+
 for iteration in range(60):
     layer_2_error = 0
     for iter in range(len(streetlights)):
